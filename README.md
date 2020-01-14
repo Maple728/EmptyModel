@@ -1,9 +1,9 @@
-# A Spatial-temporal Attention Approach for Traffic Prediction
+# A Empty Model
 
-This is a TensorFlow1.0 implementation of APTN.
+Build a model of tf1 quickly from scratch. The project contains the tconfig reader, data preprocess and model runner.
 
 ## Requirements
-- python>=3.5
+- python>=3.6
 - tensorflow>=1.12.0
 - numpy
 
@@ -15,19 +15,11 @@ pip install -r requirements.txt
 
 ## Model Training
 ```bash
-# PeMSD4
-python train.py --config_filename=configs/pems04.yaml
-
-# PeMSD8
-python train.py --config_filename=configs/pems08.yaml
+python train.py --config_filename={config_filename}
 ```
 
 
 ## Model Evaluating
 ```bash
-# PeMSD4
-python eval.py --config_filename={saved_model_config_filename}
-
-# PeMSD8
 python eval.py --config_filename={saved_model_config_filename}
 ```

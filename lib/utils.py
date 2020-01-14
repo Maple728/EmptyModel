@@ -7,28 +7,10 @@
 @desc:
 """
 import os
-from functools import reduce
-from operator import mul
+import time
+import logging
 
 from lib.metrics import *
-
-
-def tensordot(tensor_a, tensor_b):
-    """ Tensor dot function. The last dimension of tensor_a and the first dimension of tensor_b must be the same.
-    :param tensor_a:
-    :param tensor_b:
-    :return: the result of tensor_a tensor dot tensor_b.
-    """
-    last_idx_a = len(tensor_a.get_shape().as_list()) - 1
-    return tf.tensordot(tensor_a, tensor_b, [[last_idx_a], [0]])
-
-
-def get_tf_loss_function(loss_name):
-    """ Get tensorflow loss function by loss_name
-    :param loss_name:
-    :return:
-    """
-    return eval(loss_name + '_tf')
 
 
 def get_metric_functions(metric_name_list):
@@ -42,15 +24,21 @@ def get_metric_functions(metric_name_list):
     return metric_functions
 
 
-def get_num_trainable_params():
-    """ Get the number of trainable parameters in current session (model).
-    :return:
-    """
-    num_params = 0
-    for variable in tf.trainable_variables():
-        shape = variable.get_shape()
-        num_params += reduce(mul, [dim.value for dim in shape], 1)
-    return num_params
+def get_metrics_callback_from_names(metric_names):
+    metric_functions = get_metric_functions(metric_names)
+
+    def metrics(preds, labels, **kwargs):
+        """
+        :param preds:
+        :param labels:
+        :return:
+        """
+        res = dict()
+        for metric_name, metric_func in zip(metric_names, metric_functions):
+            res[metric_name] = metric_func(preds, labels, **kwargs)
+        return res
+
+    return metrics
 
 
 def set_random_seed(seed=9899):
@@ -62,16 +50,19 @@ def set_random_seed(seed=9899):
     tf.set_random_seed(seed)
 
 
-def make_config_string(config):
+def make_config_string(config, key_len=4, max_num_key=4):
     """ Generate a name for config.
     :param config:
+    :param key_len: the length of printed key
     :return:
     """
-    key_len = 4
     str_config = ''
+    num_key = 0
     for k, v in config.items():
-        str_config += k[:key_len] + '-' + str(v) + '_'
-    return str_config[:-1]
+        if num_key < max_num_key:
+            str_config += '[' + k[:key_len] + '-' + str(v) + ']'
+            num_key += 1
+    return str_config
 
 
 def window_rolling(origin_data, window_size):
@@ -95,23 +86,26 @@ def window_rolling(origin_data, window_size):
     return rolling_data
 
 
-def yield2batch_data(arrs, batch_size, keep_remainder=True):
-    """Iterate the array of arrs over 0-dim to get batch data.
-    :param arrs: a list of [n_items, ...]
+def yield2batch_data(arr_dict, batch_size, keep_remainder=True):
+    """Iterate the dictionary of array over 0-dim to get batch data.
+    :param arr_dict: a dictionary containing array whose shape is [n_items, ...]
     :param batch_size:
     :param keep_remainder: Discard the remainder if False, otherwise keep it.
     :return:
     """
-    if arrs is None or len(arrs) == 0:
+    if arr_dict is None or len(arr_dict) == 0:
         return
 
+    keys = list(arr_dict.keys())
+
     idx = 0
-    n_items = len(arrs[0])
+    n_items = len(arr_dict[keys[0]])
     while idx < n_items:
         if idx + batch_size > n_items and keep_remainder is False:
             return
         next_idx = min(idx + batch_size, n_items)
-        yield [arr[idx: next_idx] for arr in arrs]
+
+        yield {k: arr_dict[k][idx: next_idx] for k in keys}
 
         # update idx
         idx = next_idx
@@ -126,3 +120,74 @@ def create_folder(*args):
     if not os.path.exists(path):
         os.makedirs(path)
     return path
+
+
+def concat_arrs_of_dict(dict_list):
+    """ Concatenate each ndarray with the same key in the dict_list in 0-dimension.
+    :param dict_list:
+    :return: dict containing concatenated values
+    """
+    res = dict()
+
+    keys = dict_list[0].keys()
+    for k in keys:
+        arr_list = []
+        for d in dict_list:
+            arr_list.append(d[k])
+        res[k] = np.concatenate(arr_list, axis=0)
+
+    return res
+
+
+def get_logger(filename=None):
+    logger = logging.Logger(filename)
+
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s')
+    # formatter = logging.Formatter('%(asctime)s - %(pathname)s[line:%(lineno)d] - %(levelname)s: %(message)s')
+
+    # Add stdout stream handler
+    sh = logging.StreamHandler()
+    sh.setFormatter(formatter)
+    logger.addHandler(sh)
+
+    # Add file handler
+    if filename:
+        fh = logging.FileHandler(filename, mode='a')
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+
+    return logger
+
+
+class Timer(object):
+    """
+    Count the elapse between start and end time.
+    """
+
+    def __init__(self, unit='s'):
+        SECOND_UNIT = 1
+        MINUTE_UNIT = 60
+        HOUR_UNIT = 1440
+
+        unit = unit.lower()
+        if unit == 's':
+            self._unit = SECOND_UNIT
+        elif unit == 'm':
+            self._unit = MINUTE_UNIT
+        elif unit == 'h':
+            self._unit = HOUR_UNIT
+        else:
+            raise RuntimeError('Unknown unit:', unit)
+        self._unit = unit
+        # default start time is set to the time the object initialized
+        self._start_time = time.time()
+
+    def unit(self):
+        return self._unit
+
+    def start(self):
+        self._start_time = time.time()
+
+    def end(self):
+        end_time = time.time()
+        return (end_time - self._start_time) / self._unit
